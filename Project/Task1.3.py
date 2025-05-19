@@ -1,12 +1,9 @@
-
-# d e v e l o p a n e u r a l import torch
+# -*- coding: utf-8 -*-
 import numpy as np
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D as ax
 from pyDOE import lhs
 import torch
-
-
 
 # d e f i n e the n e u r a l n e t w o r k
 class Network(torch.nn.Module):

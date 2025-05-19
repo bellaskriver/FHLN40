@@ -1,10 +1,9 @@
 import torch
-
 import torch.nn as nn
 import torch.optim as optim
 import matplotlib.pyplot as plt
 
-# Define the nonconvex function
+# Define the function
 def nonconvex(x1, x2):
     fn = (1 - x1 / 2 + x1**5 + x2**3) * torch.exp(-(x1**2) - x2**2)
     return fn
@@ -50,7 +49,7 @@ for epoch in range(num_epochs):
     if (epoch + 1) % 100 == 0:
         print(f'Epoch [{epoch + 1}/{num_epochs}], Loss: {loss.item():.4f}')
 
-# Plot the loss curve
+# Plot the loss
 plt.figure()
 plt.plot(losses)
 plt.xlabel('Epoch')

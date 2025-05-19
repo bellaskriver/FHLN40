@@ -1,3 +1,6 @@
+# Kommentar: Fixa med validation set så det faktiskt används
+# Validation data generated from the manifactured solution
+
 # -*- coding: utf-8 -*-
 import torch
 import torch.nn as nn
@@ -69,48 +72,48 @@ def train_model(model, loader, epochs=20, lr=1e-3):
 def plot_results(model, X, Y, n_train):
     model.eval()
     
-    # Evaluation mode (validation set) FIX
+    # Evaluation mode #fix
     with torch.no_grad():
         X_val = X[n_train:]
         Y_val = Y[n_train:]
         Y_pred = model(X_val).cpu().numpy()
         Y_exact = Y_val.cpu().numpy()
 
-    ### Scatter plot
-    Ys = {'u1': (Y_exact[:, 0], Y_pred[:, 0]), 'u2': (Y_exact[:, 1], Y_pred[:, 1])} # Datapoints for u1 and u2
-    fig = plt.figure(figsize=(12,8))
-    
-    for label, (y_e, y_p) in Ys.items():
-        plt.scatter(y_e, y_p, s=5, alpha=0.5, label=label) # Plotting datapoints
-    mn, mx = min(Y_exact.min(), Y_pred.min()), max(Y_exact.max(), Y_pred.max()) # Min and max values for diagonal line
-    plt.plot([mn, mx], [mn, mx], 'k-') # Diagonal line
-    plt.xlabel('Exact')
-    plt.ylabel('Predicted')
-    plt.title('Exact vs. Predicted')
-    plt.legend()
-    plt.tight_layout()
+    # Scatter plot
+    fig, axes = plt.subplots(1, 2, figsize=(12, 5), constrained_layout=True)
+    for i, label in enumerate(['u1', 'u2']):
+        ax = axes[i]
+        ax.scatter(Y_exact[:, i], Y_pred[:, i], s=5, alpha=0.5, label=label)
+        mn, mx = min(Y_exact[:, i].min(), Y_pred[:, i].min()), max(Y_exact[:, i].max(), Y_pred[:, i].max())
+        ax.plot([mn, mx], [mn, mx], 'k--')
+        ax.set_xlabel('Exact')
+        ax.set_ylabel('Predicted')
+        ax.set_title(f'Exact vs. Predicted: {label}')
+        ax.legend()
     plt.show()
 
-    # Meshgrid
+    # Create grid
     x1 = torch.linspace(0, 2, 100)
     x2 = torch.linspace(0, 1, 50)
-    X2, X1 = torch.meshgrid(x2, x1, indexing='ij') # Create meshgrid
-    grid = torch.cat([X1.reshape(-1,1), X2.reshape(-1,1)], dim=1) # Combine x1 and x2
-    X1_np, X2_np = X1.cpu().numpy(), X2.cpu().numpy() # Convert to numpy for plotting
-
-    # Calculate exact and predicted solutions
+    X2, X1 = torch.meshgrid(x2, x1, indexing='ij')
+    grid = torch.cat([X1.reshape(-1,1), X2.reshape(-1,1)], dim=1)
+    X1_np, X2_np = X1.cpu().numpy(), X2.cpu().numpy()
     with torch.no_grad():
-        U1_ex = u1(grid).reshape(50, 100).cpu().numpy() 
+        U1_ex = u1(grid).reshape(50, 100).cpu().numpy()
         U2_ex = u2(grid).reshape(50, 100).cpu().numpy()
         U_pred = model(grid).cpu().numpy()
         U1_pred = U_pred[:,0].reshape(50, 100)
         U2_pred = U_pred[:,1].reshape(50, 100)
 
-    # Titles and data for plots
-    fields = [('Exact $u_1$',     U1_ex), ('Exact $u_2$',     U2_ex), ('Predicted $u_1$', U1_pred), ('Predicted $u_2$', U2_pred)]
+    # Labels
+    fields = [
+        ('Exact $u_1$', U1_ex), ('Predicted $u_1$', U1_pred),
+        ('Exact $u_2$', U2_ex), ('Predicted $u_2$', U2_pred)
+    ]
 
-    ### 2D plots
-    fig, axes = plt.subplots(2, 2, figsize=(12,8), constrained_layout=True)
+    # 2D plot
+    fig, axes = plt.subplots(2, 2, figsize=(12, 8), constrained_layout=True)
+    plt.set_cmap('jet')
     for ax, (title, Z) in zip(axes.flat, fields):
         cf = ax.contourf(X1_np, X2_np, Z, levels=50)
         fig.colorbar(cf, ax=ax, shrink=0.8)
@@ -119,17 +122,17 @@ def plot_results(model, X, Y, n_train):
         ax.set_ylabel('$x_2$')
     plt.show()
 
-    ### 3D plots
-    fig = plt.figure(figsize=(12,8))
+    # 3D plot
+    fig = plt.figure(figsize=(12, 8))
     for idx, (title, Z) in enumerate(fields):
         ax = fig.add_subplot(2, 2, idx+1, projection='3d')
         surf = ax.plot_surface(X1_np, X2_np, Z, rstride=1, cstride=1, cmap='jet', edgecolor='none')
         ax.set_title(title)
-        ax.set_xlabel('$x_1$') 
+        ax.set_xlabel('$x_1$')
         ax.set_ylabel('$x_2$')
-        ax.set_zlabel(title.split()[0])
+        ax.set_zlabel(title.split()[1])
         fig.colorbar(surf, ax=ax, shrink=0.5)
-    plt.tight_layout() 
+    plt.tight_layout()
     plt.show()
 
 # Main function
@@ -142,11 +145,11 @@ def main():
     train_ds = TensorDataset(X[:n_train], Y[:n_train])
     val_ds = TensorDataset(X[n_train:], Y[n_train:])
     train_loader = DataLoader(train_ds, batch_size=128, shuffle=True)
-    val_loader = DataLoader(val_ds, batch_size=256) #FIX
+    val_loader = DataLoader(val_ds, batch_size=256) #fix
 
     # Initialize and train the model
     model = Network(hidden_dim=20)
-    model = train_model(model, train_loader, epochs=100, lr=1e-3)
+    model = train_model(model, train_loader, epochs=1000, lr=1e-3) # Hyperparameters
 
     # Evaluate and plot results on validation set
     plot_results(model, X, Y, n_train)

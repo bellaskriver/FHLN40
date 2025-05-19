@@ -1,21 +1,19 @@
-# d e v e l o p a p y t h o n p r o g r a m to c o m p u t e the # s t r e s s t e n s o r as well as div ( sigma )
+# Kommentar: 
+
+# -*- coding: utf-8 -*-
 import torch
 from torch.autograd import grad
 import numpy as np
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D as ax
 
-#d i s p l a c e m e n t gradient , s t r a i n and
-# d e f i n e the d i s p l a c e m e n t f u n c t i o n s
+# Function for u1
+def u1(x1,x2):
+        return torch.sin(x1) + torch.cos(2 * x2) + torch.cos(x1 * x2)
 
-def u1_fn(x1,x2):
-        u1 = torch.sin(x1) + torch.cos(2 * x2) + torch.cos(x1 * x2)
-
-        return u1
-# the m a n u f a c t u r e d d i s p l a c e m e n t s
-def u2_fn(x1,x2):
-        u2 = torch.cos(x1) + torch.sin(3 * x2) + torch.sin(x1 * x2)
-        return u2
+# Function for u2
+def u2(x1,x2):
+        return torch.cos(x1) + torch.sin(3 * x2) + torch.sin(x1 * x2)
 
 # c o m p u t e d i s p l a c e m e n t g r a d i e n t s using a u t o g r a d
 def gradient_calc(u1, u2, x1_mesh, x2_mesh):

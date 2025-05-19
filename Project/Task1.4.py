@@ -1,11 +1,13 @@
-# P h y s i c s I n f o r m e d N e u r a l import torch
-import numpy as np
-import matplotlib.pyplot as plt
+# Kommentar:
+
+# -*- coding: utf-8 -*-
 import torch
 import torch.nn as nn
+import numpy as np
+import matplotlib.pyplot as plt
 
 class PINN:
-    "A␣class␣used␣to␣define␣the␣physics␣informed␣model␣in␣task␣1.4␣"
+    "Class for the PINN model."
     def __init__(self, E, v, uB, xB, b1, b2):
         self.E = E
         self.v = v
@@ -36,7 +38,6 @@ class PINN:
         layers.append(nn.Linear(hidden_dims[-1], output_dim))
 
         return nn.Sequential(*layers)
-
 
     def getDisplacements(self,x):
         """ get d i s p l a c e m e n t s """
@@ -91,7 +92,6 @@ class PINN:
         loss = differential_equation_cost + boundary_condition_cost # c a l c u l a t e total cost
         loss.backward(retain_graph=True) # b a c k w a r d p r o p a g a t i o n
         return loss
-
 
     def train(self, samples_x1, samples_x2, epochs, **kwargs):
         """ train the model """
@@ -184,3 +184,73 @@ class PINN:
         ax4.set_ylabel("x2")
         ax4.set_zlabel("u2")
         fig.colorbar(surf4, ax=ax4)
+
+# Function for u1
+def u1(x1,x2):
+        return torch.sin(x1) + torch.cos(2 * x2) + torch.cos(x1 * x2)
+
+# Function for u2
+def u2(x1,x2):
+        return torch.cos(x1) + torch.sin(3 * x2) + torch.sin(x1 * x2)
+
+
+# number of points per edge
+n_edge = 20
+
+# bottom edge: x2 = 0, x1 from 0→2
+x1_bot = torch.linspace(0, 2, n_edge)
+x2_bot = torch.zeros(n_edge)
+
+# top edge:    x2 = 1, x1 from 0→2
+x1_top = torch.linspace(0, 2, n_edge)
+x2_top = torch.ones(n_edge)
+
+# left edge:   x1 = 0, x2 from 0→1
+x1_left = torch.zeros(n_edge)
+x2_left = torch.linspace(0, 1, n_edge)
+
+# right edge:  x1 = 2, x2 from 0→1
+x1_right = 2 * torch.ones(n_edge)
+x2_right = torch.linspace(0, 1, n_edge)
+
+# pack them up
+edges = {
+    "bottom (x2=0)" : (x1_bot,  x2_bot),
+    "top    (x2=1)" : (x1_top,  x2_top),
+    "left   (x1=0)" : (x1_left, x2_left),
+    "right  (x1=2)" : (x1_right,x2_right),
+}
+
+# Evaluate & print
+for name, (x1_e, x2_e) in edges.items():
+    u1_e = u1(x1_e, x2_e)
+    u2_e = u2(x1_e, x2_e)
+    print(f"\n{name}:")
+    print("   x1     x2      u1       u2")
+    for xi, yi, u1i, u2i in zip(x1_e.tolist(), x2_e.tolist(),
+                                u1_e.tolist(),   u2_e.tolist()):
+        print(f" {xi:5.2f}  {yi:5.2f}  {u1i:8.4f}  {u2i:8.4f}")
+
+
+# given data
+E = 1 # Y o u n g s m o d u l u s
+v = 0.25 # p o i s s o n s ratio
+b1 = -0.184 # body force c a l c u l a t e d in first task - u1
+b2 = -0.104 # body force c a l c u l a t e d in first task - u2
+xB = torch.tensor([[0,0], [2,0], [2,1], [0,1]], dtype = torch.float32) # b o u n d a r y c o n d i t i o n c o o r d i n a t e s
+uB = torch.tensor([[0,0], [0.22, 0.42], [0.6, 1.1], [0.12, 0.22]], dtype = torch.float32) # b o u n d a r y c o n d i t i o n v a l u e s
+# g e n e r a t e model
+PINNmodel = PINN(E, v, uB, xB, b1, b2)
+# train model
+samples_x1 = 20
+samples_x2 = 20
+epochs = 5000
+PINNmodel.train(samples_x1, samples_x2, epochs, lr=5e-4)
+# Plot t r a i n i n g h i s t o r y
+PINNmodel.plotTrainingHistory()
+# Plot d i s p l a c e m e n t s
+x1_mesh, x2_mesh = torch.meshgrid(torch.linspace(0,2,samples_x1),torch.linspace(0,1,samples_x2),indexing="ij")
+u1 = u1(x1_mesh, x2_mesh)
+u2 = u2(x1_mesh, x2_mesh)
+PINNmodel.plotDisplacements(u1,u2)
+plt.show()
