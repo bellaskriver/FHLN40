@@ -1,12 +1,13 @@
+# Fix kvar
+
+# -*- coding: utf-8 -*-
 import torch
 import torch.nn as nn
 import torch.autograd as ag
 import numpy as np
 
-#-------------------------------------------------------
-# 1) PINN definition
-#-------------------------------------------------------
 class PINN(nn.Module):
+    """Class for the PINN model."""
     def __init__(self, hidden_layers=[50,50,50,50]):
         super().__init__()
         layers = []

@@ -1,28 +1,27 @@
+# Fix kvar
+
+# -*- coding: utf-8 -*-
 import os
 import numpy as np
 import matplotlib.pyplot as plt
 import pysindy as ps
-import math
-np.math = math
 
-
-# 1) Load data
-file_path = os.path.expanduser(
-    '~/Documents/GitHub/FHLN40/Project/SINDy_input_data.csv'
-)
+# Load data
+file_path = os.path.expanduser('~/Documents/GitHub/FHLN40/Project/SINDy_input_data.csv')
 data = np.loadtxt(file_path, delimiter=',', skiprows=1)
 t, x1, x2 = data[:,0], data[:,1], data[:,2]
 X = np.vstack([x1, x2]).T
 
-# 2) Estimate derivatives (central finite differences)
+# Central difference derivative
 dt = t[1] - t[0]
+
 # PySINDy has its own differentiation, but here’s a simple FD:
 X_dot = np.empty_like(X)
 X_dot[1:-1] = (X[2:] - X[:-2])/(2*dt)
-X_dot[0]    = (X[1]   - X[0])/dt
-X_dot[-1]   = (X[-1]  - X[-2])/dt
+X_dot[0] = (X[1] - X[0])/dt
+X_dot[-1] = (X[-1] - X[-2])/dt
 
-# Plot the raw data
+# Plot the data
 plt.figure(figsize=(8,4))
 plt.plot(t,x1,'-',label=r'$x_1$')
 plt.plot(t,x2,'--',label=r'$x_2$')
@@ -30,9 +29,7 @@ plt.xlabel('t'); plt.legend(); plt.title('Raw time series')
 plt.tight_layout()
 plt.show()
 
-
-# 3) Set up two different SINDy models
-
+# Create SINDy models
 models = {}
 
 # (a) 2nd-order polynomial library
@@ -53,7 +50,6 @@ for name, m in models.items():
     m.fit(X, x_dot=X_dot, t=dt)
     print(f"--- Identified equations ({name}) ---")
     m.print()
-
 
 # 5) Simulate forward on [0,2] and compare
 t_sim = np.linspace(0,2,200)
