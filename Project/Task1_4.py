@@ -1,5 +1,3 @@
-# Fix kvar
-
 # -*- coding: utf-8 -*-
 import torch
 import torch.nn as nn
@@ -14,181 +12,204 @@ def u1(x1, x2):
 def u2(x1, x2):
     return torch.cos(x1) + torch.sin(3 * x2) + torch.sin(x1 * x2)
 
-# PINN
+# PINN for static equilibrium: -div(sigma(u)) = b, with Dirichlet BC.
+# Cost function: C = MSE_b + MSE_f
 class PINN:
-    def __init__(self, E, v, uB, xB, b1, b2):
-        self.E, self.v = E, v # Material properties
-        self.uB, self.xB = uB, xB 
-        self.b1, self.b2 = b1, b2
+    def __init__(self, E, nu):
+        self.E = E # Young's modulus
+        self.nu = nu # Poisson's ratio
+        self.net = self.build_net(2, [20,20,20,20], 2) # Network architecture, 2 inputs, 2 outputs, 4 hidden layers with 20 neurons each
 
-        # Build model
-        self.model = self.build_model(2, [20, 20, 20, 20], 2)
-
-        # Placeholders for mesh and history
-        self.d_eq_cost_hist = None
-        self.bnd_cost_hist = None
-        self.total_cost_hist = None
-        self.optimizer = None
-        self.u_pred_mesh = None
-
-    def build_model(self, in_dim, hidden_dims, out_dim):
-        torch.manual_seed(2)
+    # Build the neural network
+    def build_net(self, in_dim, hidden, out_dim):
         layers = []
-        dims = [in_dim] + hidden_dims + [out_dim]
-        for i in range(len(dims) - 1):
+        dims = [in_dim] + hidden + [out_dim]
+        for i in range(len(dims)-1):
             layers.append(nn.Linear(dims[i], dims[i+1]))
-            if i < len(dims) - 2:
+            if i < len(dims)-2:
                 layers.append(nn.Tanh())
         return nn.Sequential(*layers)
 
-    def forward(self, x):
-        x = x.clone().requires_grad_(True)
-        u = self.model(x)
-        return u
+    # Forward pass
+    def forward(self, X):
+        return self.net(X)
 
-    def divergence(self, x1, x2, u_pred):
-        u1, u2 = u_pred[:,0], u_pred[:,1]
-        # displacement gradients
-        grads = lambda f, v: torch.autograd.grad(f, v, torch.ones_like(f), create_graph=True)[0]
-        u1_x1, u1_x2 = grads(u1, x1), grads(u1, x2)
-        u2_x1, u2_x2 = grads(u2, x1), grads(u2, x2)
+    # Calculate divergence
+    def divergence(self, X, U):
+        # Displacement components
+        u1c = U[:,0:1]
+        u2c = U[:,1:2] 
 
-        # strains
-        eps1, eps2 = u1_x1, u2_x2
-        gamma12     = u1_x2 + u2_x1
+        # Displacement gradients
+        du1 = torch.autograd.grad(u1c, X, torch.ones_like(u1c), create_graph=True)[0]
+        du2 = torch.autograd.grad(u2c, X, torch.ones_like(u2c), create_graph=True)[0]
+        u1_x1, u1_x2 = du1[:,0:1], du1[:,1:2]
+        u2_x1, u2_x2 = du2[:,0:1], du2[:,1:2]
 
-        # stresses (plane strain)
-        factor = self.E / (1 + self.v)
-        sum_eps = eps1 + eps2
-        sig1  = factor * ( eps1 + self.v/(1-2*self.v)*sum_eps )
-        sig2  = factor * ( eps2 + self.v/(1-2*self.v)*sum_eps )
-        tau12 = 0.5 * factor * gamma12
+        # Strains
+        eps11 = u1_x1
+        eps22 = u2_x2
+        eps12 = 0.5*(u1_x2 + u2_x1)
 
-        # divergence of stress
-        sig1_x1 = grads(sig1,  x1)
-        sig2_x2 = grads(sig2,  x2)
-        t12_x1  = grads(tau12, x1)
-        t12_x2  = grads(tau12, x2)
+        # Lamé constants
+        lam = self.nu*self.E/((1+self.nu)*(1-2*self.nu))
+        mu = self.E/(2*(1+self.nu))
 
-        div1 = sig1_x1 + t12_x2
-        div2 = t12_x1  + sig2_x2
+        # Stresses
+        s11 = lam*(eps11+eps22) + 2*mu*eps11
+        s22 = lam*(eps11+eps22) + 2*mu*eps22
+        s12 = 2*mu*eps12
+
+        # Divergence
+        ds11 = torch.autograd.grad(s11, X, torch.ones_like(s11), create_graph=True)[0]
+        ds12 = torch.autograd.grad(s12, X, torch.ones_like(s12), create_graph=True)[0]
+        ds22 = torch.autograd.grad(s22, X, torch.ones_like(s22), create_graph=True)[0]
+        div1 = ds11[:,0:1] + ds12[:,1:2]
+        div2 = ds12[:,0:1] + ds22[:,1:2]
+
         return div1, div2
 
-    def loss_function(self, x1_mesh, x2_mesh):
-        # forward pass on mesh
-        X_flat = torch.stack([x1_mesh.reshape(-1), x2_mesh.reshape(-1)], dim=1)
-        u_pred = self.forward(X_flat)
-        div1, div2 = self.divergence(x1_mesh, x2_mesh, u_pred)
+    # Body forces solved analytically
+    def body_force(self, X):
+        X.requires_grad_(True)
+        U_true = torch.cat([u1(X[:,0:1], X[:,1:2]), u2(X[:,0:1], X[:,1:2])], dim=1)
+        d1, d2 = self.divergence(X, U_true)
+        return -d1, -d2
 
-        # PDE residual cost
-        b1_t = self.b1 * torch.ones_like(div1)
-        b2_t = self.b2 * torch.ones_like(div2)
-        cost_pde = ((div1 + b1_t)**2 + (div2 + b2_t)**2).sum()
+    # Prepare for training
+    def prepare_training(self, nx, ny, lr):
+        # Generate meshgrid
+        x1 = torch.linspace(0,2,nx)
+        x2 = torch.linspace(0,1,ny)
+        X1,X2 = torch.meshgrid(x1,x2, indexing='ij')
+        X_int = torch.stack([X1.reshape(-1), X2.reshape(-1)], dim=1)
+        X_int.requires_grad_(True)
+        b1, b2 = self.body_force(X_int)
+        self.X_int, self.b1, self.b2 = X_int, b1, b2
+        self.opt = torch.optim.Adam(self.net.parameters(), lr) # Optimizer
+        self.hist = {'mse_b':[], 'mse_f':[], 'cost':[]} # History for loss
 
-        # boundary cost
-        uB_pred = self.forward(self.xB)
-        cost_bnd = ((uB_pred - self.uB)**2).sum()
+    # Train the model
+    def train(self, X_bnd, U_bnd, epochs):
+        Nf = self.X_int.shape[0]
+        Nb = X_bnd.shape[0]
+        for it in range(epochs):
+            self.opt.zero_grad() # Reset gradients
 
-        return cost_pde, cost_bnd
+            # Partial Differential Equation (PDE) loss
+            U_pred = self.forward(self.X_int)
+            d1, d2 = self.divergence(self.X_int, U_pred)
+            mse_f = ((d1 + self.b1)**2 + (d2 + self.b2)**2).sum() / Nf
 
-    def train(self, nx, ny, epochs, lr=1e-3):
-        # create mesh grid for PDE
-        x1 = torch.linspace(0, 2, nx, requires_grad=True)
-        x2 = torch.linspace(0, 1, ny, requires_grad=True)
-        X1, X2 = torch.meshgrid(x1, x2, indexing="ij")
-        self.x1_mesh, self.x2_mesh = X1, X2
+            # Boundary Condition loss
+            Ub = self.forward(X_bnd)
+            mse_b = ((Ub - U_bnd)**2).sum() / Nb
+            cost = mse_f + mse_b
 
-        # optimizer & history buffers
-        self.optimizer = torch.optim.Adam(self.model.parameters(), lr=lr)
-        self.d_eq_cost_hist = np.zeros(epochs)
-        self.bnd_cost_hist  = np.zeros(epochs)
-        self.total_cost_hist= np.zeros(epochs)
+            # Backpropagation
+            cost.backward(retain_graph=True)
+            self.opt.step()
+            self.hist['mse_b'].append(mse_b.item())
+            self.hist['mse_f'].append(mse_f.item())
+            self.hist['cost'].append(cost.item())
+            if it % 100 == 0 or it == epochs-1:
+                print(f"Iter {it}/{epochs-1} | MSE_b: {mse_b:.3e}, MSE_f: {mse_f:.3e}, Cost: {cost:.3e}")
 
-        # training loop
-        for i in range(epochs):
-            self.optimizer.zero_grad()
-            cost_pde, cost_bnd = self.loss_function(X1, X2)
-            loss = cost_pde + cost_bnd
-            loss.backward()
-            self.optimizer.step()
+        # Final backward without retain
+        self.opt.zero_grad()
+        mse_f = ((self.divergence(self.X_int, self.forward(self.X_int))[0] + self.b1)**2 + (self.divergence(self.X_int, self.forward(self.X_int))[1] + self.b2)**2).sum() / Nf
+        mse_b = ((self.forward(X_bnd) - U_bnd)**2).sum() / Nb
+        (mse_f + mse_b).backward()
 
-            # record history
-            self.d_eq_cost_hist[i] = cost_pde.item()
-            self.bnd_cost_hist[i]  = cost_bnd.item()
-            self.total_cost_hist[i]= loss.item()
-
-            # simple print every 100 iters
-            if i % 100 == 0 or i == epochs-1:
-                print(f"Epoch {i}/{epochs-1}  PDE Cost = {cost_pde:.3e}  Bnd Cost = {cost_bnd:.3e}")
-
-    def plot_history(self, yscale="log"):
-        plt.figure(figsize=(8,5))
-        plt.plot(self.d_eq_cost_hist, label="PDE residual")
-        plt.plot(self.bnd_cost_hist,  label="Boundary loss")
-        plt.plot(self.total_cost_hist,label="Total loss")
-        plt.yscale(yscale)
-        plt.xlabel("Epoch")
-        plt.ylabel("Loss")
-        plt.legend()
-        plt.tight_layout()
+    # Plotting function
+    def plot(self, nx, ny):
+        # Plot loss history
+        fig=plt.figure(figsize=(12,8))
+        plt.semilogy(self.hist['mse_b'], label='MSE_b')
+        plt.semilogy(self.hist['mse_f'], label='MSE_f')
+        plt.semilogy(self.hist['cost'], label='Cost')
+        plt.legend() 
+        plt.xlabel('Iter') 
+        plt.ylabel('Loss') 
         plt.show()
 
-    def plot_displacements(self, u1_m, u2_m):
-        X1_np = self.x1_mesh.detach().numpy()
-        X2_np = self.x2_mesh.detach().numpy()
-        U_pred = self.forward(torch.stack([self.x1_mesh.reshape(-1),
-                                          self.x2_mesh.reshape(-1)],1))
-        U1_pred = U_pred[:,0].reshape(X1_np.shape).detach().numpy()
-        U2_pred = U_pred[:,1].reshape(X1_np.shape).detach().numpy()
+        # Create meshgrid for plotting
+        x1 = torch.linspace(0,2,nx)
+        x2 = torch.linspace(0,1,ny)
+        X1,X2 = torch.meshgrid(x1,x2, indexing='ij')
+        X = torch.stack([X1.reshape(-1), X2.reshape(-1)],1)
+        U = self.forward(X).detach().numpy()
+        U1 = U[:,0].reshape(nx,ny); U2 = U[:,1].reshape(nx,ny)
+        U1e = u1(X1,X2).numpy(); U2e = u2(X1,X2).numpy()
 
-        titles = [
-            ("Exact $u_1$", u1_m),
-            ("Predicted $u_1$", U1_pred),
-            ("Exact $u_2$", u2_m),
-            ("Predicted $u_2$", U2_pred),
-        ]
-        fig, axes = plt.subplots(2, 2, figsize=(12,8), constrained_layout=True,
-                                 subplot_kw={"projection":"3d"})
-        for ax, (title, Z) in zip(axes.flat, titles):
-            surf = ax.plot_surface(X1_np, X2_np, Z, cmap="jet", edgecolor="none")
-            ax.set_title(title)
-            ax.set_xlabel("$x_1$"); ax.set_ylabel("$x_2$"); ax.set_zlabel(title.split()[1])
-            fig.colorbar(surf, ax=ax, shrink=0.6)
+        # Plot 3D solution
+        fig=plt.figure(figsize=(12,8))
+        cmap = 'jet'
+        for idx,(exact,pred,lab) in enumerate([(U1e,U1,'u1'),(U2e,U2,'u2')]):
+            ax=fig.add_subplot(2,2,2*idx+1,projection='3d')
+            ax.plot_surface(X1.numpy(), X2.numpy(), exact, cmap=cmap)
+            ax.set_title(f'Exact {lab}')
+            ax=fig.add_subplot(2,2,2*idx+2,projection='3d')
+            ax.plot_surface(X1.numpy(), X2.numpy(), pred, cmap=cmap)
+            ax.set_title(f'Predicted {lab}')
+        plt.tight_layout(); plt.show()
+
+        # Calculate residuals (Should be close to zero!)
+        X.requires_grad_(True)
+        U = self.forward(X)
+        d1, d2 = self.divergence(X, U)
+        b1, b2 = self.body_force(X)
+        r1 = (d1 + b1).detach().numpy().reshape(nx, ny) # Residual of u1
+        r2 = (d2 + b2).detach().numpy().reshape(nx, ny) # Residual of u2
+        print('Max residual u1:', np.max(np.abs(r1))) # Largest residual positive or negative of u1
+        print('Max residual u2:', np.max(np.abs(r2))) # Largest residual positive or negative of u2
+        print('Mean residual u1:', np.mean(r1)) # Mean residual of u1
+        print('Mean residual u2:', np.mean(r2)) # Mean residual of u2
+
+        # Plot 2D residuals
+        fig, axes = plt.subplots(1, 2, figsize=(12, 8))
+        im0 = axes[0].contourf(X1.numpy(), X2.numpy(), r1, cmap='jet')
+        plt.colorbar(im0, ax=axes[0])
+        axes[0].set_title('Residual 1')
+        im1 = axes[1].contourf(X1.numpy(), X2.numpy(), r2, cmap='jet')
+        plt.colorbar(im1, ax=axes[1])
+        axes[1].set_title('Residual 2')
+        plt.show()
 
 # Main function
 def main():
-    # Manufactured boundary
-    print("\n--- Manufactured boundary values ---")
-    corners = torch.tensor([[0,0],
-                            [2,0],
-                            [2,1],
-                            [0,1]], dtype=torch.float32)
-    x1b, x2b = corners[:,0], corners[:,1]
-    u1b = u1(x1b, x2b)
-    u2b = u2(x1b, x2b)
-    for (x1i, x2i, u1i, u2i) in zip(x1b, x2b, u1b, u2b):
-        print(f"x1={x1i:.2f}, x2={x2i:.2f} → u1={u1i:.3f}, u2={u2i:.3f}")
+    E, nu = 1.0, 0.25 # Material parameters
+    pinn = PINN(E, nu) # Initialize PINN
 
-    # Material & body‐force parameters
-    E, v = 1.0, 0.25
-    b1, b2 = -0.184, -0.104
+    # Extract Dirichlet BC
+    n=10 # Number of points on each edge of the boundary
+    edges = {
+        'Left Boundary:': (torch.zeros(n), torch.linspace(0,1,n)),
+        'Right Boundary:': (2*torch.ones(n), torch.linspace(0,1,n)),
+        'Bottom Boundary:':(torch.linspace(0,2,n), torch.zeros(n)),
+        'Top Boundary:': (torch.linspace(0,2,n), torch.ones(n))}
+    Xb=[]
 
-    # Boundary coords/values for PINN
-    xB = corners                    # [4×2]
-    uB = torch.stack([u1b, u2b], 1) # [4×2]
+    # Print boundary values
+    for name,(xs,ys) in edges.items():
+        print(name)
+        for x,y in zip(xs,ys):
+            print(f"Point ({x:.2f},{y:.2f}): u1={u1(x.unsqueeze(0),y.unsqueeze(0))[0]:.3f}, u2={u2(x.unsqueeze(0),y.unsqueeze(0))[0]:.3f}")
+        Xb.append(torch.stack([xs,ys],1))
+    X_bnd = torch.cat(Xb,0)
+    U_bnd = torch.cat([u1(X_bnd[:,0:1], X_bnd[:,1:2]), u2(X_bnd[:,0:1], X_bnd[:,1:2])],1)
 
-    # Instantiate & train PINN
-    pinn = PINN(E, v, uB, xB, b1, b2)
-    pinn.train(nx=20, ny=20, epochs=1000, lr=1e-3)
+    # Train the PINN
+    nx = 20 # Number of points in x1 direction
+    ny = 20 # Number of points in x2 direction
+    lr = 1e-3 # Learning rate
+    epochs = 3000 # Number of training epochs
 
-    # Plot training history and solutions
-    pinn.plot_history()
-    x1m, x2m = torch.meshgrid(torch.linspace(0,2,20),
-                              torch.linspace(0,1,20), indexing="ij")
-    pinn.plot_displacements(u1(x1m, x2m),
-                            u2(x1m, x2m))
-    plt.show()
+    pinn.prepare_training(nx, ny, lr)
+    pinn.train(X_bnd, U_bnd, epochs)
 
-# Run the main function
-if __name__ == "__main__":
+    # Plot training history and solution
+    pinn.plot(nx,ny)
+
+if __name__ == '__main__':
     main()
