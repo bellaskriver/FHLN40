@@ -18,7 +18,7 @@ class PINN:
     def __init__(self, E, nu):
         self.E = E # Young's modulus
         self.nu = nu # Poisson's ratio
-        self.net = self.build_net(2, [20, 20, 20], 2) # Network architecture, 2 inputs, 2 outputs, 4 hidden layers with 20 neurons each fix
+        self.net = self.build_net(2, [20, 20, 20], 2) # Network architecture
 
     # Build the neural network
     def build_net(self, in_dim, hidden, out_dim):
