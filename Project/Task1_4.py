@@ -18,7 +18,7 @@ class PINN:
     def __init__(self, E, nu):
         self.E = E # Young's modulus
         self.nu = nu # Poisson's ratio
-        self.net = self.build_net(2, [20,20,20,20], 2) # Network architecture, 2 inputs, 2 outputs, 4 hidden layers with 20 neurons each
+        self.net = self.build_net(2, [20,20,20,20], 2) # Network architecture, 2 inumpyuts, 2 outputs, 4 hidden layers with 20 neurons each
 
     # Build the neural network
     def build_net(self, in_dim, hidden, out_dim):
@@ -43,8 +43,10 @@ class PINN:
         # Displacement gradients
         du1 = torch.autograd.grad(u1c, X, torch.ones_like(u1c), create_graph=True)[0]
         du2 = torch.autograd.grad(u2c, X, torch.ones_like(u2c), create_graph=True)[0]
-        u1_x1, u1_x2 = du1[:,0:1], du1[:,1:2]
-        u2_x1, u2_x2 = du2[:,0:1], du2[:,1:2]
+        u1_x1 = du1[:,0:1] 
+        u1_x2 = du1[:,1:2]
+        u2_x1 = du2[:,0:1] 
+        u2_x2 = du2[:,1:2]
 
         # Strains
         eps11 = u1_x1
@@ -84,6 +86,8 @@ class PINN:
         X1,X2 = torch.meshgrid(x1,x2, indexing='ij')
         X_int = torch.stack([X1.reshape(-1), X2.reshape(-1)], dim=1)
         X_int.requires_grad_(True)
+
+        # Calculate analytical body forces
         b1, b2 = self.body_force(X_int)
         self.X_int, self.b1, self.b2 = X_int, b1, b2
         self.opt = torch.optim.Adam(self.net.parameters(), lr) # Optimizer
@@ -113,7 +117,7 @@ class PINN:
             self.hist['mse_f'].append(mse_f.item())
             self.hist['cost'].append(cost.item())
             if it % 100 == 0 or it == epochs-1:
-                print(f"Iter {it}/{epochs-1} | MSE_b: {mse_b:.3e}, MSE_f: {mse_f:.3e}, Cost: {cost:.3e}")
+                print(f"Iteration: [{it}/{epochs-1}]  MSE_f={mse_f:.3e},  MSE_b={mse_b:.3e},  Cost={cost:.3e}")
 
         # Final backward without retain
         self.opt.zero_grad()
@@ -129,7 +133,7 @@ class PINN:
         plt.semilogy(self.hist['mse_f'], label='MSE_f')
         plt.semilogy(self.hist['cost'], label='Cost')
         plt.legend() 
-        plt.xlabel('Iter') 
+        plt.xlabel('Iteration') 
         plt.ylabel('Loss') 
         plt.show()
 
@@ -139,18 +143,20 @@ class PINN:
         X1,X2 = torch.meshgrid(x1,x2, indexing='ij')
         X = torch.stack([X1.reshape(-1), X2.reshape(-1)],1)
         U = self.forward(X).detach().numpy()
-        U1 = U[:,0].reshape(nx,ny); U2 = U[:,1].reshape(nx,ny)
-        U1e = u1(X1,X2).numpy(); U2e = u2(X1,X2).numpy()
+        U1 = U[:,0].reshape(nx,ny) 
+        U2 = U[:,1].reshape(nx,ny)
+        U1e = u1(X1,X2).numpy() 
+        U2e = u2(X1,X2).numpy()
 
         # Plot 3D solution
         fig=plt.figure(figsize=(12,8))
         cmap = 'jet'
         for idx,(exact,pred,lab) in enumerate([(U1e,U1,'u1'),(U2e,U2,'u2')]):
             ax=fig.add_subplot(2,2,2*idx+1,projection='3d')
-            ax.plot_surface(X1.numpy(), X2.numpy(), exact, cmap=cmap)
+            ax.plot_surface(X1.numpy(), X2.numpy(), exact, cmap='jet')
             ax.set_title(f'Exact {lab}')
             ax=fig.add_subplot(2,2,2*idx+2,projection='3d')
-            ax.plot_surface(X1.numpy(), X2.numpy(), pred, cmap=cmap)
+            ax.plot_surface(X1.numpy(), X2.numpy(), pred, cmap='jet')
             ax.set_title(f'Predicted {lab}')
         plt.tight_layout(); plt.show()
 
@@ -200,16 +206,11 @@ def main():
     U_bnd = torch.cat([u1(X_bnd[:,0:1], X_bnd[:,1:2]), u2(X_bnd[:,0:1], X_bnd[:,1:2])],1)
 
     # Train the PINN
-    nx = 20 # Number of points in x1 direction
-    ny = 20 # Number of points in x2 direction
-    lr = 1e-3 # Learning rate
-    epochs = 3000 # Number of training epochs
-
-    pinn.prepare_training(nx, ny, lr)
-    pinn.train(X_bnd, U_bnd, epochs)
+    pinn.prepare_training(nx=20, ny=20, lr=1e-3) # nx, ny: number of points in x1 and x2 directions, lr: learning rate
+    pinn.train(X_bnd, U_bnd, epochs=3000) # epochs: number of training iterations
 
     # Plot training history and solution
-    pinn.plot(nx,ny)
+    pinn.plot(nx=20,ny=20) # nx, ny: number of points in x1 and x2 directions
 
 if __name__ == '__main__':
     main()
