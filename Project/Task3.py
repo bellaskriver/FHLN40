@@ -18,7 +18,7 @@ class PINN:
     def __init__(self, E, nu):
         self.E = E # Young's modulus
         self.nu = nu # Poisson's ratio
-        self.net = self.build_net(2, [20, 20, 20], 2) # Network architecture
+        self.net = self.build_net(2, [40, 40, 40, 40], 2) # Network architecture
 
     # Build the neural network
     def build_net(self, in_dim, hidden, out_dim):
@@ -250,7 +250,7 @@ def main():
     Xn.requires_grad_(True)
 
     # Train the PINN
-    pinn.prepare_training(nx=100, ny=100, lr=1e-4) # nx, ny: number of points in x1 and x2 directions, lr: learning rate
+    pinn.prepare_training(nx=100, ny=100, lr=1e-3) # nx, ny: number of points in x1 and x2 directions, lr: learning rate
     pinn.train(Xb, Ub, Xn, nnorm, tn, epochs=5000) # epochs: number of training iterations
 
     # Plot training history and solution
