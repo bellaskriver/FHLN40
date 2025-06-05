@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+
 import torch
 import torch.nn as nn
 import numpy as np
@@ -55,12 +56,12 @@ class PINN:
 
         # Lamé constants
         lam = self.nu*self.E/((1+self.nu)*(1-2*self.nu))
-        mu = self.E/(2*(1+self.nu))
+        nu = self.E/(2*(1+self.nu))
 
         # Stresses
-        s11 = lam*(eps11+eps22) + 2*mu*eps11
-        s22 = lam*(eps11+eps22) + 2*mu*eps22
-        s12 = 2*mu*eps12
+        s11 = lam*(eps11+eps22) + 2*nu*eps11
+        s22 = lam*(eps11+eps22) + 2*nu*eps22
+        s12 = 2*nu*eps12
 
         # Divergence
         ds11 = torch.autograd.grad(s11, X, torch.ones_like(s11), create_graph=True)[0]
@@ -134,7 +135,8 @@ class PINN:
         plt.semilogy(self.hist['cost'], label='Cost')
         plt.legend() 
         plt.xlabel('Iteration') 
-        plt.ylabel('Loss') 
+        plt.ylabel('Loss')
+        plt.title('Training loss') 
         plt.show()
 
         # Create meshgrid for plotting
