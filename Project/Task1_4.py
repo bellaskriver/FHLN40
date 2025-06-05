@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-import torch
+import torch 
 import torch.nn as nn
 import numpy as np
 import matplotlib.pyplot as plt
